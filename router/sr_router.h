@@ -66,7 +66,13 @@ int sr_read_from_server(struct sr_instance* );
 
 /* -- sr_router.c -- */
 void sr_init(struct sr_instance* );
-void sr_handlepacket(struct sr_instance* , uint8_t * , unsigned int , char* );
+void sr_handlepacket           (struct sr_instance*, uint8_t*, unsigned int, char* );
+void sr_handle_arp_packet      (struct sr_instance*, uint8_t*, unsigned int, char* );
+void sr_handle_ip_packet       (struct sr_instance*, uint8_t*, unsigned int, char* );
+void sr_handle_icmp_packet     (struct sr_instance*, uint8_t, uint8_t, uint32_t, uint8_t*, char* );
+void sr_send_packet_by_ip      (struct sr_instance*, uint8_t*, unsigned int, uint32_t, char* );
+void sr_send_packet_by_mac     (struct sr_instance*, uint8_t*, unsigned int, unsigned char*, char* );
+void sr_handle_all_arp_requests(struct sr_instance*, struct sr_arpreq* );
 
 /* -- sr_if.c -- */
 void sr_add_interface(struct sr_instance* , const char* );

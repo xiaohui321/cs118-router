@@ -192,3 +192,21 @@ void sr_print_if(struct sr_if* iface)
     Debug("\n");
     Debug("\tinet addr %s\n",inet_ntoa(ip_addr));
 } /* -- sr_print_if -- */
+
+/*--------------------------------------------------------------------- 
+ * Method: sr_get_interface_by_ip
+ * Scope: Global
+ *
+ * get the interface by searching ip address
+ *
+ *---------------------------------------------------------------------*/
+
+struct sr_if* sr_get_interface_by_ip(struct sr_instance* sr, uint32_t ip){
+  struct sr_if * if_walker = sr->if_list;  
+  while(if_walker){
+    if(ip == if_walker->ip)
+      return if_walker; 
+    if_walker = if_walker->next;
+  }
+  return NULL;
+}

@@ -176,3 +176,39 @@ void sr_print_routing_entry(struct sr_rt* entry)
     printf("%s\n",entry->interface);
 
 } /* -- sr_print_routing_entry -- */
+
+
+/*---------------------------------------------------------------------
+ * Method: sr_find_rt_entry
+ *
+ * Finds LPM routing table entry by ip
+ *---------------------------------------------------------------------*/
+struct sr_rt* sr_find_rt_by_ip(struct sr_instance* sr, uint32_t ip){
+  
+  /* -- REQUIRES --*/
+  assert(sr);
+  
+  if(sr->routing_table == NULL){
+    printf("WARNING:: The Routing table is empty.\n");
+    return NULL;
+  }
+  
+  struct sr_rt* rt_walker = sr->routing_table;
+  struct sr_rt* rt_result = NULL;
+  
+  uint16_t max_mask = 0;
+  uint16_t tmp_mask = 0; 
+  
+  while(rt_walker){
+    if((rt_walker->dest.s_addr & rt_walker->mask.s_addr) == (ip & rt_walker->mask.s_addr)){
+      tmp_mask = ntohl(rt_walker->mask.s_addr);
+      if(tmp_mask > max_mask){
+	rt_result = rt_walker;
+	max_mask = tmp_mask;
+      }
+    }
+    rt_walker = rt_walker->next;
+  }
+  return rt_result;
+}
+
