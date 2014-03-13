@@ -265,7 +265,6 @@ void sr_handle_icmp_packet(struct sr_instance* sr, uint8_t type, uint8_t code, u
   free(whole_frame);
 }
 
-/***********************************************************************************************************************/
 void sr_handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int len, char* iface) {
   DB(printf("DEBUG: Handling IP packet.\n"));
 
@@ -280,37 +279,40 @@ void sr_handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int l
   sr_ip_hdr_t * ip_request_frame = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
   uint16_t old_checksum = ip_request_frame->ip_sum;
   ip_request_frame->ip_sum = 0;
-
+  
   if (old_checksum != cksum(packet + sizeof(sr_ethernet_hdr_t), sizeof(sr_ip_hdr_t))) {
     fprintf(stderr, "ERROR: IP checksum is incorrect. [ABORT]\n");
     return;
   }
-
+  
   /* Check if in router's interfaces */
   struct sr_if* interface = sr_get_interface_by_ip(sr, ip_request_frame->ip_dst);
 
-  if(interface == NULL){
+  
+  if(!interface){
     DB(printf("DEBUG: Forwarding IP packet.\n"));
     struct sr_rt * forward_rt = sr_find_rt_by_ip(sr, ip_request_frame->ip_dst);
-
+    
     if (forward_rt == NULL) {
       DB(printf("DEBUG: Cannot find a route to the destination. [ABORT]\n"));
       sr_handle_icmp_packet(sr, 3, 0, ip_request_frame->ip_src, (uint8_t *)ip_request_frame, iface);
       return;
     }
-
+    
     ip_request_frame->ip_ttl--;
     if (ip_request_frame->ip_ttl == 0) {
       DB(printf("DEBUG: IP packet expired.\n"));
       sr_handle_icmp_packet(sr, 11, 0, ip_request_frame->ip_src, (uint8_t *)ip_request_frame, iface);
       return;
     }
-
+    
     ip_request_frame->ip_sum = 0;
     ip_request_frame->ip_sum = cksum((uint8_t*) ip_request_frame, sizeof(sr_ip_hdr_t));
     sr_send_packet_by_ip(sr, packet, len, forward_rt->gw.s_addr,forward_rt->interface);
-  }
     
+    return;
+  }
+  
   /* interface found */
   if (ip_request_frame->ip_p ==  ip_protocol_icmp) { 
     DB(printf("DEBUG: Handling ICMP packet.\n"));
@@ -318,7 +320,7 @@ void sr_handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int l
       fprintf(stderr, "ERROR: This ICMP packet does not have a enough length. [ABORT]\n");
       return;
     }
-
+    
     /* ICMP frame */
     sr_icmp_hdr_t * icmp_request_frame = (sr_icmp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
     old_checksum = icmp_request_frame->icmp_sum;
@@ -327,21 +329,21 @@ void sr_handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int l
       fprintf(stderr, "ERROR: ICMP checksum is incorrect. [ABORT]\n");
       return;
     }
-
+    
     if (icmp_request_frame->icmp_type != 8 || icmp_request_frame->icmp_code != 0) {
       printf("ERROR: This ICMP packet has an incorrect type and/or code. [ABORT]\n");
       return;
     }
-
+    
     /* response */
     uint8_t* whole_frame = (uint8_t *) malloc (len);
     memcpy(whole_frame + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t), packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t),
-           len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t));
-
+	   len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t));
+    
     /* ethernet frame */
     sr_ethernet_hdr_t* eth_frame = (sr_ethernet_hdr_t *) whole_frame;
     eth_frame->ether_type = htons(ethertype_ip);
-
+    
     /* IP frame */
     sr_ip_hdr_t* ip_frame = (sr_ip_hdr_t *) (whole_frame + sizeof(sr_ethernet_hdr_t));
     ip_frame->ip_v   = 4;
@@ -356,26 +358,193 @@ void sr_handle_ip_packet(struct sr_instance* sr, uint8_t* packet, unsigned int l
     ip_frame->ip_sum = cksum(whole_frame + sizeof(sr_ethernet_hdr_t), sizeof(sr_ip_hdr_t));
     ip_frame->ip_dst = ip_request_frame->ip_src;
     ip_frame->ip_src = ip_request_frame->ip_dst;
-
+    
     /* ICMP frame */
     sr_icmp_hdr_t* icmp_frame = (sr_icmp_hdr_t *)(whole_frame + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
     icmp_frame->icmp_type = 0;
     icmp_frame->icmp_code = 0;
     icmp_frame->icmp_sum  = 0; 
     icmp_frame->icmp_sum  = cksum(whole_frame + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t), 
-                                  len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t));
-
+				  len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t));
+    
     /* send response */
     sr_send_packet_by_ip(sr, whole_frame, len, ip_frame->ip_dst, iface);
     
     free(whole_frame);
-
+    
   } else if (ip_request_frame->ip_p == 6 || ip_request_frame->ip_p == 17) {
-      DB(printf("DEBUG: Handling UDP/TCP packet.\n"));
-      sr_handle_icmp_packet(sr, 3, 3, ip_request_frame->ip_src, (uint8_t *)ip_request_frame, iface);
-      return;
-  } else {
-      fprintf(stderr, "ERROR: Cannot find the corresponding protocol. [ABORT]\n");
-      return;
+    DB(printf("DEBUG: Handling UDP/TCP packet.\n"));
+    sr_handle_icmp_packet(sr, 3, 3, ip_request_frame->ip_src, (uint8_t *)ip_request_frame, iface);
+  
+  } else 
+    fprintf(stderr, "ERROR: Cannot find the corresponding protocol. [ABORT]\n");
+}
+
+
+void sr_handle_ip_packet_true(struct sr_instance* sr, uint8_t* packet, unsigned int len, char* iface) {
+  DB(printf("DEBUG: Handling IP packet.\n"));
+
+  if (len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)) {
+    fprintf(stderr, "ERROR: This IP packet does not have a enough length. [ABORT]\n");
+    return;
   }
+
+  DB(print_hdr_ip(packet + sizeof(sr_ethernet_hdr_t))); 
+
+  /* ip request frame */
+  sr_ip_hdr_t * ip_request_frame = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
+  uint16_t old_cksum = ip_request_frame->ip_sum;
+  ip_request_frame->ip_sum = 0;
+
+  if (old_cksum != cksum(packet + sizeof(sr_ethernet_hdr_t), sizeof(sr_ip_hdr_t))) {
+    fprintf(stderr, "ERROR: IP checksum is incorrect. [ABORT]\n");
+    return;
+  }
+
+  /* Check if in router's interfaces */
+  struct sr_if* interface = sr_get_interface_by_ip(sr, ip_request_frame->ip_dst);
+
+
+  if (interface) {
+    /* Interface exists */
+
+    if (ip_request_frame->ip_p == ip_protocol_icmp) { /* ICMP */
+      if (len < ( sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)) + sizeof(sr_icmp_hdr_t)) {
+        fprintf(stderr, "Error: ICMP header - insufficient length\n");
+        return;
+      }
+      printf("*** -> Processing ICMP Packet\n");
+
+      /* Create ICMP Packet */
+      sr_icmp_hdr_t* req_icmp = (sr_icmp_hdr_t *)(packet + ( sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)));
+
+      old_cksum = req_icmp->icmp_sum;
+      req_icmp->icmp_sum = 0;
+
+      if (old_cksum != cksum(packet + ( sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)), len - ( sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)))) {
+        fprintf(stderr, "Error: ICMP header - invalid checksum\n");
+        return;
+      }
+
+      /* Process ICMP message */
+      if (req_icmp->icmp_type != 8 || req_icmp->icmp_code != 0) {
+        /* Drop packet if not echo request */
+        printf("*** -> ICMP wasn't type echo.  Dropping packet\n");
+        return;
+      }
+
+      /* Set response length equal to request's */
+      uint16_t response_length = len;
+
+      /* TODO(Tim): This code looks redundant.  We should probably use
+          sr_handle_icmp_packet to send the ping so we don't do all of
+          this repeated work.  DRY DRY DRY
+      */
+      /* Create Ethernet packet with ICMP */
+      uint8_t* response_packet = (uint8_t *)malloc(response_length);
+
+      /* Copy over packet ICMP header + body */
+      memcpy(response_packet + ( sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)), packet + ( sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)),
+             response_length - ( sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)));
+
+      /*
+        Populate ICMP Message
+      */
+      sr_icmp_hdr_t* response_icmp = (sr_icmp_hdr_t *)(response_packet +
+                                                       ( sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)));
+
+      /* Format echo reply */
+      response_icmp->icmp_type = 0;
+      response_icmp->icmp_code = 0;
+
+      /* Generate ICMP checksum */
+      response_icmp->icmp_sum = 0;  /* Clear just in case */
+      response_icmp->icmp_sum = cksum(response_packet + ( sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)),
+                                      response_length - ( sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)));
+
+      /* Populate response IP Packet */
+      sr_ip_hdr_t* response_ip = (sr_ip_hdr_t *)(response_packet +
+                                                 sizeof(sr_ethernet_hdr_t));
+
+      /* Swap src and dst addresses */
+      response_ip->ip_dst = ip_request_frame->ip_src;
+      response_ip->ip_src = ip_request_frame->ip_dst;
+
+      /* Set IP Headers */
+      response_ip->ip_v = 4;
+      response_ip->ip_hl = 5;
+      response_ip->ip_tos = 0;
+      response_ip->ip_len = htons(response_length - sizeof(sr_ethernet_hdr_t));
+      response_ip->ip_id = htons(0);
+      response_ip->ip_off = htons(IP_DF);
+      response_ip->ip_ttl = 100;
+      response_ip->ip_p = ip_protocol_icmp;
+
+      /* Generate IP checksum */
+      response_ip->ip_sum = 0;
+      response_ip->ip_sum = cksum(response_packet + sizeof(sr_ethernet_hdr_t),
+                                  sizeof(sr_ip_hdr_t));
+
+      /* Modify Ethernet packet */
+      sr_ethernet_hdr_t* response_eth = (sr_ethernet_hdr_t *)(response_packet);
+      response_eth->ether_type = htons(ethertype_ip);
+
+      printf("*** -> Sending ICMP ping reply\n");
+      sr_send_packet_by_ip(sr, response_packet, response_length,
+          response_ip->ip_dst, iface);
+      printf("*** -> Packet sent (%d)\n", response_length);
+
+      free(response_packet);
+
+    } else if (ip_request_frame->ip_p == 6 || ip_request_frame->ip_p == 17) {
+      /* TCP or UDP */
+      printf("*** -> TCP or UDP found.  Sending back ICMP type 3, code 3\n");
+
+      sr_handle_icmp_packet(
+          sr, 3, 3, ip_request_frame->ip_src, (uint8_t *)ip_request_frame, iface);
+
+    } else {
+      /* Drop packet if other protocol */
+      printf("*** -> Protocol not found.  Dropping packet\n");
+      return;
+    }
+
+  } else {
+    /* Forward the Packet */
+    printf("*** -> Forwarding Process Initiated\n");
+
+    /* Routing Table lookup */
+    struct sr_rt* route = sr_find_rt_by_ip(sr, ip_request_frame->ip_dst);
+
+    /* Make sure there is a next route. */
+    if (route == NULL) {
+      printf("*** -> Route does not exist.  Forwarding terminated\n");
+
+      sr_handle_icmp_packet(
+          sr, 3, 0, ip_request_frame->ip_src, (uint8_t *)ip_request_frame, iface);
+
+      return ;
+    }
+
+    /* Decrement the TTL */
+    ip_request_frame->ip_ttl--;
+    if (ip_request_frame->ip_ttl == 0) {
+      /* Send back ICMP time exceeded */
+      printf("*** -> Packet TTL expired.\n");
+      sr_handle_icmp_packet(
+          sr, 11, 0, ip_request_frame->ip_src, (uint8_t *)ip_request_frame, iface);
+      return;
+    }
+
+    /* Update the checksum */
+    ip_request_frame->ip_sum = 0;
+    ip_request_frame->ip_sum = cksum((uint8_t*) ip_request_frame, sizeof(sr_ip_hdr_t));
+
+    /* Send the packet to the correct IP */
+    sr_send_packet_by_ip(sr, packet, len, route->gw.s_addr,
+        route->interface);
+    printf("*** -> Packet forwarded\n");
+  }
+
+  return;
 }

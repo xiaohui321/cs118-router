@@ -26,12 +26,12 @@ class CS144Topo( Topo ):
     
     def __init__( self, *args, **kwargs ):
         Topo.__init__( self, *args, **kwargs )
-        server1 = self.addHost( 'server1' )
-        server2 = self.addHost( 'server2' )
-        router = self.addSwitch( 'sw0' )
-        client = self.addHost('client')
+        server1 = self.add_host( 'server1' )
+        server2 = self.add_host( 'server2' )
+        router = self.add_switch( 'sw0' )
+        client = self.add_host('client')
         for h in server1, server2, client:
-            self.addLink( h, router )
+            self.add_link( h, router )
 
 
 class CS144Controller( Controller ):
@@ -108,22 +108,26 @@ def set_default_route(host):
     host.cmd('route del -net %s.0.0.0/8 dev %s-eth0' % (ips[0], host.name))
 
 def get_ip_setting():
-    try:
-        with open(IPCONFIG_FILE, 'r') as f:
-            for line in f:
-                if( len(line.split()) == 0):
-                  break
-                name, ip = line.split()
-                print name, ip
-                IP_SETTING[name] = ip
-            info( '*** Successfully loaded ip settings for hosts\n %s\n' % IP_SETTING)
-    except EnvironmentError:
-        exit("Couldn't load config file for ip addresses, check whether %s exists" % IPCONFIG_FILE)
+    if (not os.path.isfile(IPCONFIG_FILE)):
+        return -1
+    f = open(IPCONFIG_FILE, 'r')
+    for line in f:
+        if( len(line.split()) == 0):
+          break
+        name, ip = line.split()
+        print name, ip
+        IP_SETTING[name] = ip
+    return 0
 
 def cs144net():
     stophttp()
     "Create a simple network for cs144"
-    get_ip_setting()
+    r = get_ip_setting()
+    if r == -1:
+        exit("Couldn't load config file for ip addresses, check whether %s exists" % IPCONFIG_FILE)
+    else:
+        info( '*** Successfully loaded ip settings for hosts\n %s\n' % IP_SETTING)
+
     topo = CS144Topo()
     info( '*** Creating network\n' )
     net = Mininet( topo=topo, controller=RemoteController, ipBase=IPBASE )
